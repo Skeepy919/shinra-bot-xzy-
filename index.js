@@ -1,17 +1,18 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, delay } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const http = require('http');
 
+// Servidor HTTP simple para mantener Render activo 24/7 sin que detenga la instancia
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Shinra xzy activo 24/7\n');
 }).listen(PORT, () => {
-    console.log(`[HTTP] Servidor listo en puerto ${PORT}`);
+    console.log(`[HTTP] Servidor activo en puerto ${PORT}`);
 });
 
 const NUMERO_TELEFONO = '51910745575';
-let codigoPedido = false;
+let pairingSolicitado = false;
 
 async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./session_auth');
@@ -19,28 +20,28 @@ async function iniciarBot() {
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
-        printQRInTerminal: false,
-        browser: Browsers.macOS('Desktop'),
+        // Configuración oficial para pairing code
+        browser: ['Ubuntu', 'Chrome', '20.0.04'],
         syncFullHistory: false
     });
 
     sock.ev.on('creds.update', saveCreds);
 
+    // Evento oficial: en cuanto Baileys genera el ticket preliminar de sesión (qr), solicitamos el pairing code
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // Se solicita el código únicamente cuando WhatsApp emite el evento de handshake preliminar
-        if (!sock.authState.creds.registered && !codigoPedido && qr) {
-            codigoPedido = true;
-            await delay(1500);
+        if (qr && !sock.authState.creds.registered && !pairingSolicitado) {
+            pairingSolicitado = true;
             try {
+                await delay(1500);
                 const code = await sock.requestPairingCode(NUMERO_TELEFONO);
                 console.log('\n====================================');
                 console.log('⚡ TU CODIGO DE VINCULACION ES:', code);
                 console.log('====================================\n');
             } catch (err) {
                 console.log('[ERROR PAIRING]:', err?.message || err);
-                codigoPedido = false;
+                pairingSolicitado = false;
             }
         }
 
@@ -60,9 +61,12 @@ async function iniciarBot() {
     sock.ev.on('messages.upsert', async ({ messages }) => {
         const m = messages[0];
         if (!m.message || m.key.fromMe) return;
+
         const texto = m.message.conversation || m.message.extendedTextMessage?.text || '';
+        const remitente = m.key.remoteJid;
+
         if (texto.toLowerCase() === '.menu' || texto.toLowerCase() === '.ping') {
-            await sock.sendMessage(m.key.remoteJid, { text: '⚡ *Shinra xzy esta en linea 24/7*' });
+            await sock.sendMessage(remitente, { text: '⚡ *Shinra xzy esta activo 24/7*' });
         }
     });
 }
