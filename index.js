@@ -1,53 +1,71 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, delay } = require('@whiskeysockets/baileys');
+const { 
+    default: makeWASocket, 
+    useMultiFileAuthState, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    delay 
+} = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const http = require('http');
 
-// 1. Servidor web para mantener Render activo 24/7
+// Servidor web para Render 24/7
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Shinra xzy activo 24/7\n');
 }).listen(PORT, () => {
-    console.log(`[HTTP] Servidor en puerto ${PORT}`);
+    console.log(`[HTTP] Servidor listo en puerto ${PORT}`);
 });
 
 const NUMERO_TELEFONO = '51910745575';
-let codigoSolicitado = false;
+let codigoPedido = false;
 
 async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./session_auth');
     
+    // Obtiene la versión actual de WhatsApp para evitar el error 405
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    console.log(`[WA] Usando versión WA v${version.join('.')}, isLatest: ${isLatest}`);
+
     const sock = makeWASocket({
+        version,
         logger: pino({ level: 'silent' }),
         auth: state,
-        browser: Browsers.ubuntu('Chrome')
+        printQRInTerminal: false,
+        browser: ['Ubuntu', 'Chrome', '20.0.04'],
+        syncFullHistory: false
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        // Disparo oficial: se ejecuta SOLO cuando WhatsApp ya tiene el canal listo
-        if (qr && !sock.authState.creds.registered && !codigoSolicitado) {
-            codigoSolicitado = true;
+    // Si aún no está vinculado, solicita el código tras estabilizar el handshake
+    if (!sock.authState.creds.registered && !codigoPedido) {
+        codigoPedido = true;
+        setTimeout(async () => {
             try {
-                await delay(2000);
                 const code = await sock.requestPairingCode(NUMERO_TELEFONO);
                 console.log('\n====================================');
                 console.log('⚡ TU CODIGO DE VINCULACION ES:', code);
                 console.log('====================================\n');
             } catch (err) {
-                console.log('Error obteniendo pairing code:', err?.message || err);
-                codigoSolicitado = false;
+                console.log('[ERROR PAIRING]:', err?.message || err);
+                codigoPedido = false;
             }
-        }
+        }, 6000);
+    }
+
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect } = update;
 
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
-            const reconectar = statusCode !== DisconnectReason.loggedOut;
-            console.log(`[WS] Desconectado (status: ${statusCode}). Reconectando: ${reconectar}`);
-            if (reconectar) {
+            console.log(`[WS] Desconectado con status: ${statusCode}`);
+            
+            if (statusCode === DisconnectReason.loggedOut) {
+                console.log('Sesión cerrada. Reiniciando credenciales...');
+                codigoPedido = false;
+                setTimeout(iniciarBot, 3000);
+            } else {
                 setTimeout(iniciarBot, 4000);
             }
         } else if (connection === 'open') {
@@ -65,7 +83,7 @@ async function iniciarBot() {
         const remitente = m.key.remoteJid;
 
         if (texto.toLowerCase() === '.menu' || texto.toLowerCase() === '.ping') {
-            await sock.sendMessage(remitente, { text: '⚡ *Shinra xzy esta en linea y funcionando 24/7*' });
+            await sock.sendMessage(remitente, { text: '⚡ *Shinra xzy esta en linea 24/7*' });
         }
     });
 }
