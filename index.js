@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, delay } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const http = require('http');
 
@@ -11,39 +11,42 @@ http.createServer((req, res) => {
 });
 
 const NUMERO_TELEFONO = '51910745575';
+let codigoPedido = false;
 
 async function iniciarBot() {
-    console.log('Iniciando conexion con WhatsApp...');
     const { state, saveCreds } = await useMultiFileAuthState('./session_auth');
 
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false,
-        browser: ['Ubuntu', 'Chrome', '20.0.04']
+        browser: Browsers.macOS('Desktop'),
+        syncFullHistory: false
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    if (!sock.authState.creds.registered) {
-        console.log('Pidiendo codigo para:', NUMERO_TELEFONO);
-        setTimeout(async () => {
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        // Se solicita el código únicamente cuando WhatsApp emite el evento de handshake preliminar
+        if (!sock.authState.creds.registered && !codigoPedido && qr) {
+            codigoPedido = true;
+            await delay(1500);
             try {
                 const code = await sock.requestPairingCode(NUMERO_TELEFONO);
                 console.log('\n====================================');
                 console.log('⚡ TU CODIGO DE VINCULACION ES:', code);
                 console.log('====================================\n');
             } catch (err) {
-                console.log('Error pidiendo codigo:', err?.message || err);
+                console.log('[ERROR PAIRING]:', err?.message || err);
+                codigoPedido = false;
             }
-        }, 5000);
-    }
+        }
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
-            console.log(`[WS] Desconectado: ${statusCode}. Reconectando...`);
+            console.log(`[WS] Desconectado (${statusCode}). Reconectando...`);
             if (statusCode !== DisconnectReason.loggedOut) {
                 setTimeout(iniciarBot, 3000);
             }
