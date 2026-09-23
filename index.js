@@ -1,14 +1,7 @@
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    fetchLatestBaileysVersion, 
-    delay 
-} = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const http = require('http');
 
-// Servidor web para Render 24/7
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -18,29 +11,22 @@ http.createServer((req, res) => {
 });
 
 const NUMERO_TELEFONO = '51910745575';
-let codigoPedido = false;
 
 async function iniciarBot() {
+    console.log('Iniciando conexion con WhatsApp...');
     const { state, saveCreds } = await useMultiFileAuthState('./session_auth');
-    
-    // Obtiene la versión actual de WhatsApp para evitar el error 405
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    console.log(`[WA] Usando versión WA v${version.join('.')}, isLatest: ${isLatest}`);
 
     const sock = makeWASocket({
-        version,
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false,
-        browser: ['Ubuntu', 'Chrome', '20.0.04'],
-        syncFullHistory: false
+        browser: ['Ubuntu', 'Chrome', '20.0.04']
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Si aún no está vinculado, solicita el código tras estabilizar el handshake
-    if (!sock.authState.creds.registered && !codigoPedido) {
-        codigoPedido = true;
+    if (!sock.authState.creds.registered) {
+        console.log('Pidiendo codigo para:', NUMERO_TELEFONO);
         setTimeout(async () => {
             try {
                 const code = await sock.requestPairingCode(NUMERO_TELEFONO);
@@ -48,25 +34,18 @@ async function iniciarBot() {
                 console.log('⚡ TU CODIGO DE VINCULACION ES:', code);
                 console.log('====================================\n');
             } catch (err) {
-                console.log('[ERROR PAIRING]:', err?.message || err);
-                codigoPedido = false;
+                console.log('Error pidiendo codigo:', err?.message || err);
             }
-        }, 6000);
+        }, 5000);
     }
 
-    sock.ev.on('connection.update', async (update) => {
+    sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
-
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
-            console.log(`[WS] Desconectado con status: ${statusCode}`);
-            
-            if (statusCode === DisconnectReason.loggedOut) {
-                console.log('Sesión cerrada. Reiniciando credenciales...');
-                codigoPedido = false;
+            console.log(`[WS] Desconectado: ${statusCode}. Reconectando...`);
+            if (statusCode !== DisconnectReason.loggedOut) {
                 setTimeout(iniciarBot, 3000);
-            } else {
-                setTimeout(iniciarBot, 4000);
             }
         } else if (connection === 'open') {
             console.log('\n====================================');
@@ -78,12 +57,9 @@ async function iniciarBot() {
     sock.ev.on('messages.upsert', async ({ messages }) => {
         const m = messages[0];
         if (!m.message || m.key.fromMe) return;
-
         const texto = m.message.conversation || m.message.extendedTextMessage?.text || '';
-        const remitente = m.key.remoteJid;
-
         if (texto.toLowerCase() === '.menu' || texto.toLowerCase() === '.ping') {
-            await sock.sendMessage(remitente, { text: '⚡ *Shinra xzy esta en linea 24/7*' });
+            await sock.sendMessage(m.key.remoteJid, { text: '⚡ *Shinra xzy esta en linea 24/7*' });
         }
     });
 }
