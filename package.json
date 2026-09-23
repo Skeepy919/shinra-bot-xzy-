@@ -7,7 +7,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "github:WhiskeySockets/Baileys",
+    "@whiskeysockets/baileys": "6.7.9",
     "pino": "^9.0.0"
   }
 }
