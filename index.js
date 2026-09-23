@@ -2,7 +2,7 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } 
 const pino = require('pino');
 const http = require('http');
 
-// Servidor web simple para que Render mantenga el bot activo 24/7
+// Servidor web para Render 24/7
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -25,30 +25,14 @@ async function iniciarBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    let pairingSolicitado = false;
-
     sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
+        const { connection, lastDisconnect, qr } = update;
 
-        if (!sock.authState.creds.registered && !pairingSolicitado) {
-            pairingSolicitado = true;
-            await delay(6000);
-            try {
-                const code = await sock.requestPairingCode(NUMERO_TELEFONO);
-                console.log('\n====================================');
-                console.log('⚡ TU CODIGO DE VINCULACION ES:', code);
-                console.log('====================================\n');
-            } catch (err) {
-                console.log('Reintentando codigo de vinculacion...', err?.message || err);
-                pairingSolicitado = false;
-            }
-        }
-        
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log('Conexion cerrada. Reconectando...', shouldReconnect);
             if (shouldReconnect) {
-                setTimeout(iniciarBot, 3000);
+                setTimeout(iniciarBot, 5000);
             }
         } else if (connection === 'open') {
             console.log('\n====================================');
@@ -56,6 +40,20 @@ async function iniciarBot() {
             console.log('====================================\n');
         }
     });
+
+    // Solicita el código de 8 dígitos después de que el socket inicialice
+    if (!sock.authState.creds.registered) {
+        setTimeout(async () => {
+            try {
+                const code = await sock.requestPairingCode(NUMERO_TELEFONO);
+                console.log('\n====================================');
+                console.log('⚡ TU CODIGO DE VINCULACION ES:', code);
+                console.log('====================================\n');
+            } catch (err) {
+                console.log('Error al pedir el codigo:', err?.message || err);
+            }
+        }, 10000); // 10 segundos de espera para conexión limpia
+    }
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
         const m = messages[0];
@@ -71,4 +69,3 @@ async function iniciarBot() {
 }
 
 iniciarBot();
-          
