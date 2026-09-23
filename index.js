@@ -1,17 +1,18 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, delay } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const http = require('http');
 
-// Servidor web para Render 24/7
+// 1. Servidor web para mantener Render activo 24/7
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Shinra xzy en linea 24/7\n');
+    res.end('Shinra xzy activo 24/7\n');
 }).listen(PORT, () => {
-    console.log(`Servidor web activo en el puerto ${PORT}`);
+    console.log(`[HTTP] Servidor en puerto ${PORT}`);
 });
 
 const NUMERO_TELEFONO = '51910745575';
+let codigoSolicitado = false;
 
 async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./session_auth');
@@ -19,8 +20,7 @@ async function iniciarBot() {
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
-        printQRInTerminal: false,
-        browser: ['Ubuntu', 'Chrome', '20.0.04']
+        browser: Browsers.ubuntu('Chrome')
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -28,32 +28,34 @@ async function iniciarBot() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        if (connection === 'close') {
-            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('Conexion cerrada. Reconectando...', shouldReconnect);
-            if (shouldReconnect) {
-                setTimeout(iniciarBot, 5000);
-            }
-        } else if (connection === 'open') {
-            console.log('\n====================================');
-            console.log('✅ Shinra xzy conectado con exito');
-            console.log('====================================\n');
-        }
-    });
-
-    // Solicita el código de 8 dígitos después de que el socket inicialice
-    if (!sock.authState.creds.registered) {
-        setTimeout(async () => {
+        // Disparo oficial: se ejecuta SOLO cuando WhatsApp ya tiene el canal listo
+        if (qr && !sock.authState.creds.registered && !codigoSolicitado) {
+            codigoSolicitado = true;
             try {
+                await delay(2000);
                 const code = await sock.requestPairingCode(NUMERO_TELEFONO);
                 console.log('\n====================================');
                 console.log('⚡ TU CODIGO DE VINCULACION ES:', code);
                 console.log('====================================\n');
             } catch (err) {
-                console.log('Error al pedir el codigo:', err?.message || err);
+                console.log('Error obteniendo pairing code:', err?.message || err);
+                codigoSolicitado = false;
             }
-        }, 10000); // 10 segundos de espera para conexión limpia
-    }
+        }
+
+        if (connection === 'close') {
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+            const reconectar = statusCode !== DisconnectReason.loggedOut;
+            console.log(`[WS] Desconectado (status: ${statusCode}). Reconectando: ${reconectar}`);
+            if (reconectar) {
+                setTimeout(iniciarBot, 4000);
+            }
+        } else if (connection === 'open') {
+            console.log('\n====================================');
+            console.log('✅ Shinra xzy conectado con exito a WhatsApp');
+            console.log('====================================\n');
+        }
+    });
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
         const m = messages[0];
@@ -63,7 +65,7 @@ async function iniciarBot() {
         const remitente = m.key.remoteJid;
 
         if (texto.toLowerCase() === '.menu' || texto.toLowerCase() === '.ping') {
-            await sock.sendMessage(remitente, { text: '⚡ *Shinra xzy esta activo y en linea 24/7*' });
+            await sock.sendMessage(remitente, { text: '⚡ *Shinra xzy esta en linea y funcionando 24/7*' });
         }
     });
 }
